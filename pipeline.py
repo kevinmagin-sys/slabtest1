@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
-from store import SharedStore
+from store import SharedStore, MockQueue
 
 class SlabPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -14,17 +14,18 @@ class SlabPayload(BaseModel):
     payload_data: Dict[str, Any]
 
 class GatekeeperCore:
-    def __init__(self, store: SharedStore):
+    def __init__(self, store: SharedStore, queue: MockQueue):
         self.store = store
+        self.queue = queue
         self.MAX_ALLOWED_SIZE = 1048576 # 1MB in bytes
 
-    def emit_metrics(self, type: str, reason: Optional[str] = None, payload_id: Optional[uuid.UUID] = None):
+    def emit_metrics(self, type: str, reason: Optional[str] = None, payload_id: Optional[str] = None):
         # Stub: Metrics routing logic from previous turn
         pass
 
     async def handle_request(self, request: Request):
         content_length = request.headers.get("content-length")
-        
+
         if content_length and int(content_length) > self.MAX_ALLOWED_SIZE:
             self.emit_metrics("security_alert", "oversized_payload")
             return JSONResponse(
@@ -42,14 +43,17 @@ class GatekeeperCore:
                 content={"error": "Invalid payload schema"}
             )
 
+        self.queue.enqueue(validated_data.model_dump())
+
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"status": "ingested", "id": str(validated_data.identifier)}
+            content={"status": "enqueued", "id": str(validated_data.identifier)}
         )
 
 app = FastAPI()
 store = SharedStore()
-gatekeeper = GatekeeperCore(store)
+queue = MockQueue()
+gatekeeper = GatekeeperCore(store, queue)
 
 @app.post("/pipeline/ingest")
 async def ingest_endpoint(request: Request):
