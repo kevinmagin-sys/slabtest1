@@ -22,40 +22,26 @@ class SharedStore:
                 return None
             return self._data.get(key)
 
-    def set(self, key: str, value: Any):
+    def set(self, key: str, value: Any, ttl: Optional[int] = None):
         with self._lock:
             self._data[key] = value
-            self._expires.pop(key, None)
+            if ttl:
+                self._expires[key] = time.time() + ttl
 
-    def delete(self, key: str) -> bool:
-        with self._lock:
-            existed = key in self._data
-            self._data.pop(key, None)
-            self._expires.pop(key, None)
-            return existed
+class MockQueue:
+    def __init__(self):
+        self._queue = {}
+        self._index = 0
+        self._lock = threading.Lock()
 
-    def exists(self, key: str) -> bool:
+    def enqueue(self, item):
         with self._lock:
-            if self._is_expired(key):
-                return False
-            return key in self._data
+            self._queue[self._index] = item
+            self._index += 1
 
-    def incr(self, key: str) -> int:
+    def dequeue(self):
         with self._lock:
-            if self._is_expired(key):
-                self._data[key] = 0
-            
-            val = self._data.get(key, 0)
-            if not isinstance(val, int):
-                raise TypeError("Value is not an integer")
-            
-            new_val = val + 1
-            self._data[key] = new_val
-            return new_val
-
-    def expire(self, key: str, ttl: int) -> bool:
-        with self._lock:
-            if self._is_expired(key) or key not in self._data:
-                return False
-            self._expires[key] = time.time() + ttl
-            return True
+            if not self._queue:
+                return None
+            first_key = min(self._queue.keys())
+            return self._queue.pop(first_key)
